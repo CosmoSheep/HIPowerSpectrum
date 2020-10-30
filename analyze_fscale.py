@@ -3,6 +3,7 @@
 import numpy as np
 import sys
 import pandas
+import matplotlib.pyplot as plt
 
 def load_f(name):
 	with open(name,'r') as f:
@@ -20,7 +21,7 @@ class f_scale:
 	def __init__(self,file_name,a):
 		parsec=3.085677581e16 # m per parsec
 		self.file_name=file_name	
-		self.H_0=67.74e3/(parsec*10**6) # Hubble constants now, 67.74 km/s/mpc
+		self.H_0=67.74e3/(parsec*10**6) # in units of s^-1, Hubble constants now, 67.74 km/s/mpc
 		self.Omega_m=0.3089 # Omega_m = 0.3089+-0.0062
 		self.G=6.674e-11  #6.674×10−11 m3*kg−1*s−2 ### 4.30091(25)×10−3 pc*M_solar-1*(km/s)^2
 		self.solar_m= 1.98847e30 #(1.98847±0.00007)×10^30 kg
@@ -28,11 +29,13 @@ class f_scale:
 		self.a_dec=0.000942791416826941
 		self.a_t=a # final scale factor
 
-		self.t_dec=2*self.a_dec**(3/2)/3/self.H_0/np.sqrt(self.Omega_m)
-		self.t= 2*self.a_t**(3/2)/3/self.H_0/np.sqrt(self.Omega_m)
+		self.t_dec=2*self.a_dec**(3./2)/3/self.H_0/np.sqrt(self.Omega_m)
+		self.t= 2*self.a_t**(3./2)/3/self.H_0/np.sqrt(self.Omega_m)
 
 		self.psi_dec=self.psi(self.t_dec)
-		self.rho_mo=8*self.Omega_m*self.H_0**2/3/np.pi/self.G
+		# print('psi_dec='+str(self.psi_dec)+'   '+str((self.t_dec/self.t)**(2./3)))
+
+		self.rho_mo=3*self.Omega_m*self.H_0**2/8/np.pi/self.G 
 
 		# print(self.H_0,self.t_dec,self.t)
 
@@ -70,15 +73,43 @@ class f_scale:
 	def results(self):
 		psi=self.psi_dec
 		t=self.t_dec
+
+		ker =[]
+		p=[]
+		cs_aH = []
+		a=[]
+		a_dot=[]
+		ts=[]
+
 		kF_inverse2=0
-		dpsi=(1-self.psi_dec)/10000.
+		dpsi=(1-self.psi_dec)/1000.
 		c_s,gamma,T_0,logT_0=self.cs_extract()
-		for i in range(10000):
-			dt=3/2*np.sqrt(psi)*t*dpsi
+		for i in range(1000):
+			ker.append(self.kernel(psi))
+			p.append(psi)
+			cs_aH.append(c_s**2/(self.a_deriv(t))**2)
+			a.append(self.a(t))
+			a_dot.append(self.a_deriv(t))
+			ts.append(t)
+
+			dt=3./2*np.sqrt(psi)*self.t*dpsi
 			kF_inverse2+=self.kernel(psi)*c_s**2/(self.a_deriv(t))**2*dpsi
 			psi+=dpsi
 			t+=dt
 
+		print(cs_aH)
+		print(a)
+		print(a_dot)
+		print(ts)
+		print(ker)
+		print(p)
+
+		# plt.plot(np.array(p),np.array(ker),label=r'$\psi_{dec}=$'+str(self.psi_dec))
+		# plt.show()
+
+		# plt.plot(np.array(p),np.array(cs_aH),label=r'$c_s/(aH)^2$')
+		# plt.show()
+		print(np.max(cs_aH))
 		kF=np.sqrt(1/kF_inverse2)
 		MF=self.rho_mo*4./3*np.pi**4*(kF_inverse2)**(3./2)/self.solar_m*67.74/100 # in units of M_solar/h
 
@@ -117,7 +148,7 @@ for fold in [path_nv,path]:
 		print('Sound speed c_s='+str(c_s[i])+', gamma='+str(gamma[i]))
 		print('Temperature at mean density T_0='+str(T_0[i])+', log10T_0='+str(logT_0[i])+'\n')
 	data={'a':a,'z':z,'MF':MF,'kF':kF,'c_s':c_s,'gamma':gamma,'T_0':T_0,'logT_0':logT_0,'kF_inverse2':kF_inverse2}
-	filename='f_scale_'+z_re+suffix+'.csv' if fold==path else 'f_scale_'+z_re+'-nv'+suffix+'.csv'
+	filename='f_scale_'+z_re+suffix+'_test.csv' if fold==path else 'f_scale_'+z_re+'-nv'+suffix+'_test.csv'
 	print('data --> '+ filename+'\n')
 	pandas.DataFrame(data).to_csv(filename)
 
