@@ -11,4 +11,5 @@
 
 ---
 > Copyright:You may freely distribute and copy the data and codes in the repository. You may also modify it as you wish, and distribute these modified versions as long as you indicate prominently any changes you made in the original code, and as long as you leave the copyright notices, and the no-warranty notice intact.
-> See COPYRIGHT and COPYING of Gadget2 license information.
+
+> See COPYRIGHT and COPYING for Gadget2 license information.
