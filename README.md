@@ -1,6 +1,4 @@
-# HI_PowerSpectrum
-
-##### This is a repository of public available data and codes we use in the paper [Long et al. 2021](https://arxiv.org/pdf/2107.07615.pdf). 
+##### This is a repository of public available data and codes we use in [Long et al. 2021](https://arxiv.org/pdf/2107.07615.pdf). 
 
 ---
 - **fmass_mean.csv & fmass_mean-nv.csv** - filtering mass data with and without streaming velocity effects, $3.5\leq z_{obs}\leq 5.5$, $6\leq z_{re}\leq12$. 
