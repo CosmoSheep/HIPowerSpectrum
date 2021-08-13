@@ -2,8 +2,9 @@
 
 import numpy as np
 import sys
-import pandas
+import pandas as pd
 import matplotlib.pyplot as plt
+from scipy import interpolate
 
 def load_f(name):
 	with open(name,'r') as f:
@@ -14,8 +15,8 @@ z_re = sys.argv[1]
 suffix = sys.argv[2]
 path='/fs/scratch/PCON0003/osu10670/fmass/HMZ'+z_re+suffix
 path_nv='/fs/scratch/PCON0003/osu10670/fmass/HMZ'+z_re+'-nv'+suffix
-
-
+# path='/fs/scratch/PCON0003/osu10670/cr-1/HMZ'+z_re+'-cr'
+# path_nv='/fs/scratch/PCON0003/osu10670/cr-nov-1/HMZ'+z_re+'-nov-cr'
 class f_scale:
 
 	def __init__(self,file_name,a):
@@ -37,9 +38,10 @@ class f_scale:
 
 		self.rho_mo=3*self.Omega_m*self.H_0**2/8/np.pi/self.G 
 
+
 		# print(self.H_0,self.t_dec,self.t)
 
-	def cs_extract(self):
+	def cs_extract(self): 
 		k=1.38069e-23 # Boltzmann constant @ J*K-1
 		m_p=1.67262192369e-27 # proton mass @ kg
 
@@ -53,10 +55,10 @@ class f_scale:
 		gamma=np.array([((np.log10(i[4])-np.log10(T_0))/np.log10(i[3])+1) for i in data if (i[3]-1>0.05 and i[3]<300)])
 		gamma=np.mean(gamma[:][gamma>-1]) 
 
-		mu=m_p/2 # reduced mass @ pure H plasma
+		mu=0.6127*m_p # reduced mass @ H+/He+/e- plasma with 24.53% He+
 		c_s = np.sqrt(gamma*k*T_0/mu) # calculate sound speed
 
-		return c_s, gamma, T_0,logT_0
+		return c_s, gamma, T_0, logT_0
 
 	def kernel(self,psi):
 		return 2*(1-3*self.psi_dec/psi+2*(self.psi_dec/psi)**(3./2))*(1-psi**(1./2))/(1-3*self.psi_dec+2*self.psi_dec**(3./2))
@@ -70,87 +72,101 @@ class f_scale:
 	def a_deriv(self,time):
 		return 2./3.*(3*np.sqrt(self.Omega_m)*self.H_0/2)**(2./3)*time**(-1./3)
 
-	def results(self):
+	def results(self,c_s,v_bc):
 		psi=self.psi_dec
 		t=self.t_dec
 
-		ker =[]
-		p=[]
-		cs_aH = []
-		a=[]
-		a_dot=[]
-		ts=[]
-
-		kF_inverse2=0
+		kF_s_inverse2=0
 		dpsi=(1-self.psi_dec)/1000.
-		c_s,gamma,T_0,logT_0=self.cs_extract()
 		for i in range(1000):
-			ker.append(self.kernel(psi))
-			p.append(psi)
-			cs_aH.append(c_s**2/(self.a_deriv(t))**2)
-			a.append(self.a(t))
-			a_dot.append(self.a_deriv(t))
-			ts.append(t)
 
 			dt=3./2*np.sqrt(psi)*self.t*dpsi
-			kF_inverse2+=self.kernel(psi)*c_s**2/(self.a_deriv(t))**2*dpsi
-			psi+=dpsi
 			t+=dt
+			psi+=dpsi
+			if self.a(t)<1./(1+float(z_re)): 
+				continue
+			# print(self.a(t))
+		
+		kF_s_inverse2+=self.kernel(psi)*c_s(self.a(t)+1.e-8)**2/(self.a_deriv(t))**2*dpsi
 
-		print(cs_aH)
-		print(a)
-		print(a_dot)
-		print(ts)
-		print(ker)
-		print(p)
 
+		kF_v_inverse2=3*(v_bc*self.t_dec/self.a_dec)**2*((-3./2.*self.psi_dec*np.log(self.psi_dec)+3*self.psi_dec**(3./2)-3*self.psi_dec //
+			-9./2*self.psi_dec*(1-self.psi_dec**(1./2))**2*(1+2*self.psi_dec**(1./2))**(-1))/(1-3*self.psi_dec+2*(self.psi_dec)**(3./2)))
+
+		kF_inverse2=kF_v_inverse2+kF_s_inverse2
 		# plt.plot(np.array(p),np.array(ker),label=r'$\psi_{dec}=$'+str(self.psi_dec))
 		# plt.show()
 
 		# plt.plot(np.array(p),np.array(cs_aH),label=r'$c_s/(aH)^2$')
 		# plt.show()
-		print(np.max(cs_aH))
 		kF=np.sqrt(1/kF_inverse2)
 		MF=self.rho_mo*4./3*np.pi**4*(kF_inverse2)**(3./2)/self.solar_m*67.74/100 # in units of M_solar/h
 
-		return MF,kF,kF_inverse2,c_s,gamma,T_0,logT_0
+		return MF,kF_v_inverse2,kF_s_inverse2,kF,kF_inverse2
 
-for fold in [path_nv,path]:
+for fold in [path,path_nv]:
 	if fold==path:
 		print('Simulation results with streaming velocity:')
+		v_bc=33. #km//s
 	else:
 		print('Simulation results without streaming velocity:')
-	a=load_f(fold+'/outputs.txt').split('\n')
-	a.pop(-1)
-	a=[float(i) for i in a]
+		v_bc=0.
+	a=np.loadtxt(fold+'/outputs.txt')
 	z=[1/i-1 for i in a]
 	MF=[]
 	kF=[]
 	kF_inverse2=[]
+	kF_v_inverse2=[]
+	kF_s_inverse2=[]
 	c_s=[]
 	gamma=[]
 	T_0=[]
 	logT_0=[]
 
-	for i in range(5):
-		f=f_scale(fold+'/snapshot_00'+str(i)+'.extract',a[i])
-		MF_tmp,kF_tmp,kF_inverse2_tmp,c_s_tmp,gamma_tmp,T_0_tmp,logT_0_tmp = f.results()
-		MF.append(MF_tmp)
-		kF.append(kF_tmp)
-		kF_inverse2.append(kF_inverse2_tmp)
+	for i in range(len(a)):
+		print(str(len(a))+' '+str(i))
+		f=f_scale(fold+'/snapshot_0'+str(i).zfill(2)+'.extract',a[i])
+		# MF_tmp,kF_tmp,kF_inverse2_tmp,c_s_tmp,gamma_tmp,T_0_tmp,logT_0_tmp = f.results()
+		c_s_tmp,gamma_tmp,T_0_tmp,logT_0_tmp=f.cs_extract()
+		# MF.append(MF_tmp)
+		# kF.append(kF_tmp)
+		# kF_inverse2.append(kF_inverse2_tmp)
 		c_s.append(c_s_tmp)
 		gamma.append(gamma_tmp)
 		T_0.append(T_0_tmp)
 		logT_0.append(logT_0_tmp)
 
+	# dt=pd.read_csv('cs_09.csv')
+	# cs=dt['c_s'].to_numpy()
+	cs_func=interpolate.interp1d(np.array(a),np.array(c_s))
+
+	
+	# print(np.array(c_s))
+
+	tb={'a':a,'z':z,'c_s':c_s,'gamma':gamma,'T_0':T_0,'logT_0':logT_0}
+	cs_filename='cs_'+z_re+suffix+'.csv' if fold==path else 'cs_'+z_re+suffix+'-nv.csv'
+	pd.DataFrame(tb).to_csv('./fmass'+suffix+'/'+cs_filename)
+
+	for i in np.arange(1,len(a)):
+		f=f_scale(fold+'/snapshot_00'+str(i)+'.extract',a[i])
+		MF_tmp,kF_v_inverse2_tmp,kF_s_inverse2_tmp,kF_tmp,kF_inverse2_tmp = f.results(cs_func,v_bc)
+
+		MF.append(MF_tmp)
+		kF_v_inverse2.append(kF_v_inverse2_tmp)
+		kF_s_inverse2.append(kF_s_inverse2_tmp)
+		kF.append(kF_tmp)
+		kF_inverse2.append(kF_inverse2_tmp)
+	
 		print('At redshift z='+str(z[i])+', a='+str(a[i]))
-		print('Filtering mass M_F='+str(MF[i])+' , filtering scale k_F='+str(kF[i])+', k_F^-2='+str(kF_inverse2[i]))
-		print('Sound speed c_s='+str(c_s[i])+', gamma='+str(gamma[i]))
-		print('Temperature at mean density T_0='+str(T_0[i])+', log10T_0='+str(logT_0[i])+'\n')
-	data={'a':a,'z':z,'MF':MF,'kF':kF,'c_s':c_s,'gamma':gamma,'T_0':T_0,'logT_0':logT_0,'kF_inverse2':kF_inverse2}
-	filename='f_scale_'+z_re+suffix+'_test.csv' if fold==path else 'f_scale_'+z_re+'-nv'+suffix+'_test.csv'
+		print('Filtering mass M_F='+str(MF[-1])+' , filtering scale k_F='+str(kF[-1])+', k_F^-2='+str(kF_inverse2[-1])+' ,k_Fv^-2='+str(kF_v_inverse2[-1])+' ,k_Fs^-2='+str(kF_s_inverse2[-1]))
+		# print('Sound speed c_s='+str(cs_func(a[i]))+', gamma='+str(gamma[i]))
+		# print('Temperature at mean density T_0='+str(T_0[i])+', log10T_0='+str(logT_0[i])+'\n')
+	# data={'a':a,'z':z,'MF':MF,'kF':kF,'c_s':c_s,'gamma':gamma,'T_0':T_0,'logT_0':logT_0,'kF_inverse2':kF_inverse2}
+	data={'a':a[1:],'z':z[1:],'MF':MF,'kF':kF,'kF_inverse2':kF_inverse2,'kF_v_inverse2':kF_v_inverse2,'kF_s_inverse2':kF_s_inverse2}
+	filename='f_scale_'+z_re+suffix+'.csv' if fold==path else 'f_scale_'+z_re+'-nv'+suffix+'.csv'
+	# filename='f_scale_'+z_re+'.csv' if fold==path else 'f_scale_'+z_re+'-nv'+'.csv'	
 	print('data --> '+ filename+'\n')
-	pandas.DataFrame(data).to_csv(filename)
+	pd.DataFrame(data).to_csv('./fmass'+suffix+'/'+filename)
 
 # data=[float(i) for i in data.split()]
 # data=np.reshape(data,(len(data)/9,9))

@@ -23,6 +23,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import re, os, sys
 import pandas as pd
+from matplotlib import cm
 
 # Constants
 # rho_crit=2.775808e11 # units are M_solar h^2/Mpc^3
@@ -32,13 +33,13 @@ G=4.30091e-9  #6.674×10−11 m3*kg−1*s−2 ### 4.30091(25)×10−3 Mpc*M_sola
 solar_m= 1.98847e30 #(1.98847±0.00007)×10^30 kg
 
 rho_crit=3*H_0**2/8/np.pi/G*H_0/100 # M_solar/(Mpc)^3/h
-z=5.5
+# z=5.5
 
 Omega_m=0.3089 # Omega_m = 0.3089+-0.0062
 rhom=rho_crit*Omega_m #*(1+z)**3
 f_b=0.17 # baryon fraction
 #MF=3039380.57457326 # in unit of M_solar/h. with velocity
-MF=[2917922.227,2896770.297] # no streaming velocity, streaming velocity
+# MF=[2917922.227,2896770.297] # no streaming velocity, streaming velocity
 
 A=0.186
 a=1.47
@@ -73,6 +74,8 @@ class bias_v:
 		self.delta_crit=1.686 # critcal overdensity for collapse
 		self.Mhalos=np.logspace(7,16,10000)
 		self.ks=np.logspace(-4,3,1000)
+		if (self.z_re-self.z_obs)>6.0:
+			raise ParamError('z_re - z_obs should be smaller than 6.0')
 
 		self.halo_func()
 
@@ -107,7 +110,33 @@ class bias_v:
 
 		self.dndM=f_sigma*rhom/Mhalos*np.gradient(np.log(sigmas**(-1)),Mhalos)
 
+	def rho_HI_direct(self,file_sv,file_nv):
+		f_b = 0.17
+		MF_sv=pd.read_csv(file_sv,index_col='z_obs')
+		MF_nv=pd.read_csv(file_nv,index_col='z_obs')
+		rho_HI_sv=[]
+		rho_HI_nv=[]
+		# z_res=[6.0,7.0,8.0,8.5,9.0,10.0,11.0,12.0]
+	
+		# for z_re in z_res:
+		# 	mf_sv = MF_sv.loc[self.z_obs][str(z_re)]
+		# 	M_baryon_sv = f_b*self.Mhalos*(1+(2**(1./3)-1)*mf_sv/self.Mhalos)**(-3.)
+		# 	rho_HI_sv.append(integrate.simps(self.dndM*M_baryon_sv,self.Mhalos))
+		# 	mf_nv = MF_nv.loc[self.z_obs][str(z_re)]
+		# 	M_baryon_nv = f_b*self.Mhalos*(1+(2**(1./3)-1)*mf_nv/self.Mhalos)**(-3.)
+		# 	rho_HI_nv.append(integrate.simps(self.dndM*M_baryon_nv,self.Mhalos))
+		# bv=np.diff(np.array([rho_HI_nv,rho_HI_sv]),axis=0)/np.mean(np.array([rho_HI_nv,rho_HI_sv]),axis=0)
 
+		mf_sv = MF_sv.loc[self.z_obs][str(self.z_re)]
+		M_baryon_sv = f_b*self.Mhalos*(1+(2**(1./3)-1)*mf_sv/self.Mhalos)**(-3.)
+		rho_HI_sv=integrate.simps(self.dndM*M_baryon_sv,self.Mhalos)
+		mf_nv = MF_nv.loc[self.z_obs][str(self.z_re)]
+		M_baryon_nv = f_b*self.Mhalos*(1+(2**(1./3)-1)*mf_nv/self.Mhalos)**(-3.)
+		rho_HI_nv=integrate.simps(self.dndM*M_baryon_nv,self.Mhalos)
+
+		bv=np.diff([rho_HI_nv,rho_HI_sv])/np.mean([rho_HI_nv,rho_HI_sv])
+		
+		return bv[0]
 
 	def rho_HI(self,file_name,xi_arr):
 		f_b = 0.17
@@ -128,19 +157,19 @@ class bias_v:
 		rhos=np.array(rho_HI_itp(z_range))
 		xi_dot=np.gradient(xi_arr(z_range),z_range)
 
-		print(xi_arr(z_range))
-		print(xi_dot)
+		# print(xi_arr(z_range))
+		# print(xi_dot)
 
 		rho_HI=integrate.simps(-rhos*xi_dot,z_range)
-		print(rho_HI)
-		print(integrate.simps(-rhos,xi_arr(z_range)))
+		# print(rho_HI)
+		# print(integrate.simps(-rhos,xi_arr(z_range)))
 
 		return rho_HI
 
 
 	def bias1_func(self):
-		f_b=0.17
-		MF=pd.read_csv('fmass_nv.csv',index_col='z_obs')
+		f_b=0.1573
+		MF=pd.read_csv('fmass_mean-nv.csv',index_col='z_obs')
 		mf=MF.loc[self.z_obs][str(self.z_re)]
 		self.M_baryon = f_b*self.Mhalos*(1+(2**(1./3)-1)*mf/self.Mhalos)**(-3.)
 
@@ -240,14 +269,15 @@ class bias_v:
 
 class b_sink:
 
-	def __init__(self,  z_re, z_obs):
+	def __init__(self,  z_re, z_obs, scenario=None):
 		self.H_0=67.74e3/(3.0857e22) # Hubble constants now, 67.74 km/s/mpc
 		self.Omega_m=0.3089 # Omega_m = 0.27+-0.04
 		self.z_obs = z_obs
 		self.z_re = z_re
+		self.scenario = scenario if scenario is not None else 'fiducial'
 		self.z_range=self.z_re-self.z_obs
 		self.dz = -0.01
-		self.Yp = 0.2453 #
+		self.Yp = 0.249 # Helium abudance
 		self.rho_crit=1.88e-29 # h^2 g/cm^3
 		Omega_mh2 = 0.0223
 		mH = 1.6729895e-24 # g
@@ -429,7 +459,11 @@ class b_sink:
 		Mpc_cm_factor = 3.0857e24
 		rho_SFR=ap*((1+z)**bp)/(1+((1+z)/cp)**dp)
 
-		return f_esc*epsilon_ion*rho_SFR
+		if self.scenario == 'fiducial': 
+			epsilon=f_esc*epsilon_ion*rho_SFR
+		elif self.scenario == 'delay':
+			epsilon=f_esc*epsilon_ion*rho_SFR/1.55
+		return epsilon
 
 	def nH(self,z): # mean value of hydrogen number density
 		return self.nH_0*(1+z)**3
@@ -514,23 +548,157 @@ class b_sink:
 		# r = np.arange(self.z0,self.z_obs,self.dz)
 		return -self.xi_arr_nov(self.z_obs)*b_xv
 
+# z_obs=[3.5,4.0,4.5,5.0, 5.5]
+# b1=[]
+# b2=[]
+# bs2=[]
+# bv=[]
+# bv_direct=[]
+# bv_indirect=[]
+# bv_indirect_sink=[]
+# dxi_dz=[]
 
-xi= b_sink(12.0,5.0)
-xi_sv, xi_nv = xi.xi_func()
-rho=bias_v(12.0,5.0)
+# for z in z_obs:
+# 	xi= b_sink(9.0,z,'delay')
+# 	xi_sv, xi_nv = xi.xi_func()
+# 	rho=bias_v(9.0,z)
 
-rho_sv = rho.rho_HI('fmass_sv.csv',xi_sv)
-rho_nv = rho.rho_HI('fmass_nv.csv',xi_nv)
+# 	rho_sv = rho.rho_HI('fmass_mean.csv',xi_sv)
+# 	rho_nv = rho.rho_HI('fmass_mean-nv.csv',xi_nv)
 
-bv=np.log(rho_sv/rho_nv)
-b1,bs2=rho.bias1_func()
-b2=rho.bias2_func()
+# 	bv_tmp=np.log(rho_sv/rho_nv)
+# 	b1_tmp,bs2_tmp=rho.bias1_func()
+# 	b2_tmp=rho.bias2_func()
+# 	bv_direct_tmp=rho.rho_HI_direct('fmass_mean.csv','fmass_mean-nv.csv')
 
-print('bv='+str(bv))
-print((rho_sv-rho_nv)/np.mean([rho_sv,rho_nv]))
-print('b1='+str(b1))
-print('bs2='+str(bs2))
-print('b2='+str(b2))
+
+# 	b1.append(b1_tmp)
+# 	b2.append(b2_tmp)
+# 	bv.append(bv_tmp)
+# 	bs2.append(bs2_tmp)
+# 	bv_direct.append(bv_direct_tmp)
+# 	bv_indirect.append(bv_tmp-bv_direct_tmp)
+# 	bv_indirect_sink.append(xi.b())
+# 	dxi_dz.append(np.sum(xi.dxi_dz()))
+# 	# print(xi.dxi_dz())
+	
+# 	print('For delayed reionization')
+# 	print('At z_obs='+str(z)+', bv='+str(bv_tmp)+',bv_direct='+ str(bv_direct_tmp)+',bv_ind='+str(bv_tmp-bv_direct_tmp))
+# 	print('b1='+str(b1_tmp))
+# 	print('bs2='+str(bs2_tmp))
+# 	print('b2='+str(b2_tmp))
+
+# z_obs=[3.5,4.0,4.5,5.0, 5.5]
+# b1=[]
+# b2=[]
+# bs2=[]
+# bv=[]
+# bv_direct=[]
+# bv_indirect=[]
+# bv_indirect_sink=[]
+# dxi_dz=[]
+
+# for z in z_obs:
+# 	xi= b_sink(9.0,z,'fiducial')
+# 	xi_sv, xi_nv = xi.xi_func()
+# 	rho=bias_v(9.0,z)
+
+# 	rho_sv = rho.rho_HI('fmass_mean.csv',xi_sv)
+# 	rho_nv = rho.rho_HI('fmass_mean-nv.csv',xi_nv)
+
+# 	bv_tmp=np.log(rho_sv/rho_nv)
+# 	b1_tmp,bs2_tmp=rho.bias1_func()
+# 	b2_tmp=rho.bias2_func()
+# 	bv_direct_tmp=rho.rho_HI_direct('fmass_mean.csv','fmass_mean-nv.csv')
+
+
+# 	b1.append(b1_tmp)
+# 	b2.append(b2_tmp)
+# 	bv.append(bv_tmp)
+# 	bs2.append(bs2_tmp)
+# 	bv_direct.append(bv_direct_tmp)
+# 	bv_indirect.append(bv_tmp-bv_direct_tmp)
+# 	bv_indirect_sink.append(xi.b())
+# 	dxi_dz.append(np.sum(xi.dxi_dz()))
+# 	# print(xi.dxi_dz())
+	
+# 	print('For fiducial reionization')
+# 	print('At z_obs='+str(z)+', bv='+str(bv_tmp)+',bv_direct='+ str(bv_direct_tmp)+',bv_ind='+str(bv_tmp-bv_direct_tmp))
+# 	print('b1='+str(b1_tmp))
+# 	print('bs2='+str(bs2_tmp))
+# 	print('b2='+str(b2_tmp))
+
+# tb={'z_obs':z_obs,'b1':b1,'b2':b2,'bs2':bs2, 'bv':bv, 'bv_dir':bv_direct, 'bv_ind':bv_indirect,'bv_ind_sink':bv_indirect_sink,'dxi_dz':
+# dxi_dz}
+# pd.DataFrame(tb).to_csv('bias_table.csv')
+
+
+###### xi history quantity #######
+# z_re = 11.9
+# bias = b_sink(z_re,z_re-6.0,'delay')
+# xi=interpolate.interp1d(bias.xi_arr(np.arange(z_re-6.0,z_re,0.05)),np.arange(z_re-6.0,z_re,0.05))
+# xi_nov=interpolate.interp1d(bias.xi_arr_nov(np.arange(z_re-6.0,z_re,0.05)),np.arange(z_re-6.0,z_re,0.05))
+# # dxi_dv=xi-xi_nov
+# print(bias.xi_arr(np.arange(z_re-6.0,z_re,0.05)))
+# print('z='+str(xi(0.5))+" when xi=0.5")
+# print('z='+str(xi(1.0))+" when xi=1")
+# print(bias.xi_arr(np.arange(6.8,7.0,0.01)))
+# # print('z='+str()+" when xi=1")
+
+# dxi_dv=bias.xi_arr(np.arange(6.8,7.0,0.01))-bias.xi_arr_nov(np.arange(6.8,7.0,0.01))
+# print(dxi_dv)
+
+
+# c=3.0e8
+# H_0=67.74 # Hubble constants now, 67.74 km/s/mpc
+# # H_0=67.74/(parsec*1e3) # Hubble constants, /s/m
+# G=4.30091e-9  #6.674×10−11 m3*kg−1*s−2 ### 4.30091(25)×10−3 Mpc*M_solar-1*(km/s)^2
+# # G=6.674e-11  #6.674×10−11 m3*kg−1*s−2 ### 4.30091(25)×10−3 Mpc*M_solar-1*(km/s)^2
+# solar_m= 1.98847e30 #(1.98847±0.00007)×10^30 kg
+# parsec=3.085677581e16 # m per parsec
+
+# rho_crit=3*H_0**2/8/np.pi/G # M_solar/(Mpc)^3
+# # rho_crit=3*H_0**2/8/np.pi/G/(1e6)/(parsec*1e6)**2 #kg/m^3
+
+# Omega_m=0.3089 # Omega_m = 0.3089+-0.0062
+# rhom=rho_crit*Omega_m #*(1+z)**3
+# Yp = 0.2454 # Helium abudance
+# f_b=0.17 # baryon fraction
+# sigma_T=6.65e-29 # Thomson scattering cross section in m^2
+# mH = 1.6729895e-27 # kg
+
+# bias = b_sink(12,0.,'delay')
+# dz=0.01
+# tau_t=0
+# tau_t_int=[]
+# for z in np.arange(12.,0.,-0.01):
+# 	tau_t_int.append(tau_t)
+# 	# if z>6.8:	xi=bias.xi_arr(z)
+# 	# else:	xi=1
+# 	xi=bias.xi_arr(z)
+# 	print([xi,z])
+# 	tau_t=Omega_m*f_b*rho_crit*(1-Yp)/mH*(1+Yp/4./(1.-Yp))*xi*(1+z)**3*sigma_T*c/(1+z)/(H_0*np.sqrt(Omega_m*(1+z)**3))*dz*solar_m/(parsec*1e6)**2/1000
+
+# print('Thomson scattering cross section with streaming velocity is '+str(np.sum(tau_t_int)))
+
+# $\tau=0.123,0.096, 0.061,0.026$ with $z_{re}=12,9,8,7$ respectively]$
+# plt.plot(np.arange(12.0,0,-0.01),tau_t_int)
+# plt.xlabel('z')
+# plt.ylabel(r'$d\tau$')
+# plt.show()
+
+# tau_t=0
+# tau_t_int=[]
+# for z in np.arange(12.0,0,-0.01):
+# 	tau_t_int.append(tau_t)
+# 	if z>6.8:	xi=bias.xi_arr_nov(z)
+# 	else:	xi=1
+# 	tau_t=Omega_m*rho_crit*(1-Yp)/mH*(1+Yp/4./(1.-Yp))*xi*(1+z)**3*sigma_T*c/(1+z)/(H_0*np.sqrt(Omega_m*(1+z)**3))*dz*solar_m/(parsec*1e6)**2/1000/(H_0/100)
+
+# print('Thomson scattering cross section without streaming velocity is '+str(np.sum(tau_t_int)))
+
+
+
 # z_re=float(sys.argv[1])
 # z_obs=float(sys.argv[2])
 
@@ -559,51 +727,101 @@ print('b2='+str(b2))
 
 # label=[['',300],['2',100],['3',500]]
 
-# fig, (ax1, ax2, ax3) = plt.subplots(3, 1)
+
+# fig, (ax1, ax2) = plt.subplots(2, 1)
 # z_re = 12.0
-# bias = b_sink(z_re,z_re-6.0)
-# xi=bias.xi_arr(np.arange(z_re-6.0,z_re,0.1))
-# xi_nov=bias.xi_arr_nov(np.arange(z_re-6.0,z_re,0.1))
-# dxi_dz=-np.gradient(xi,np.arange(z_re-6.0,z_re,0.1))
+# bias = b_sink(z_re,z_re-6.5,'fiducial')
+# xi=bias.xi_arr(np.arange(z_re-6.5,z_re,0.1))
+# xi_nov=bias.xi_arr_nov(np.arange(z_re-6.5,z_re,0.1))
+# dxi_dz=-np.gradient(xi,np.arange(z_re-6.5,z_re,0.1))
 # dxi_dv=xi-xi_nov
+
+# bias_del = b_sink(z_re,z_re-6.5,'delay')
+# xi_del=bias_del.xi_arr(np.arange(z_re-6.5,z_re,0.1))
+
 # z_c=np.where(xi<1.0)[0][0]
-# ax1.plot(np.arange(z_re-6.0,z_re,0.1),xi,label=r'$z_{re}=$'+str(z_re))
-# ax2.plot(np.arange(z_re-6.0,z_re,0.1),dxi_dz)
-# ax3.plot(np.arange(z_re-6.0+z_c*0.1,z_re,0.1),dxi_dv[z_c:])
+# z_c_del=np.where(xi_del<1.0)[0][0]
+# ax1.plot(np.arange(z_re-6.5+z_c_del*0.1,z_re,0.1),xi[z_c_del:],color='red',linewidth=0.8,label='Fiducial')
+# ax1.plot(np.arange(z_re-6.5+z_c_del*0.1,z_re,0.1),xi_del[z_c_del:],color='blue',linewidth=0.8,label='Delayed Reionization')
+# # ax2.plot(np.arange(z_re-6.0,z_re,0.1),dxi_dz)
+# ax2.plot(np.arange(z_re-6.5+z_c*0.1,z_re,0.1),dxi_dv[z_c:],linewidth=0.8, color='red')
+# ax2.set_xlim([z_re-6.5+z_c_del*0.1,z_re])
+
+# xi=bias.xi_arr(np.arange(z_re-6.5,z_re,0.1))
+# xi_nov=bias.xi_arr_nov(np.arange(z_re-6.5,z_re,0.1))
+# dxi_dz=-np.gradient(xi,np.arange(z_re-6.5,z_re,0.1))
+# dxi_dv=xi-xi_nov
 
 # ax1.set_yscale('log')
 # ax1.set_ylabel(r'$x_i$')
 # ax1.set(title='Reionization Histories')
 # ax1.legend()
+# # ax2.set_yscale('log')
+# # ax2.set_ylabel(r'$dx_i/dz$')
+# # ax2.set_yscale('log')
+# ax2.set_yscale('log')
+# ax2.set_xlabel('z')
+# ax2.set_ylabel(r'$\partial x_i/\partial(v_{bc}^2/\sigma^2)$')
+# plt.figure(figsize=(40,20))
+# plt.show()
+
+fig, (ax1, ax2) = plt.subplots(2, 1)
+z_re = 9.0
+bias = b_sink(z_re,z_re-5.5,'fiducial')
+xi=bias.xi_arr(np.arange(z_re-5.5,z_re,0.1))
+xi_nov=bias.xi_arr_nov(np.arange(z_re-5.5,z_re,0.1))
+dxi_dz=-np.gradient(xi,np.arange(z_re-5.5,z_re,0.1))
+dxi_dv=xi-xi_nov
+
+bias_del = b_sink(z_re,z_re-5.5,'delay')
+xi_del=bias_del.xi_arr(np.arange(z_re-5.5,z_re,0.1))
+
+z_c=np.where(xi<1.0)[0][0]
+z_c_del=np.where(xi_del<1.0)[0][0]
+ax1.plot(np.arange(z_re-5.5+z_c_del*0.1,z_re,0.1),xi[z_c_del:],color='red',linewidth=0.8,label='Fiducial')
+ax1.plot(np.arange(z_re-5.5+z_c_del*0.1,z_re,0.1),xi_del[z_c_del:],color='blue',linewidth=0.8,label='Delayed Reionization')
+# ax2.plot(np.arange(z_re-6.0,z_re,0.1),dxi_dz)
+ax2.plot(np.arange(z_re-5.5+z_c*0.1,z_re,0.1),dxi_dv[z_c:],linewidth=0.8, color='red')
+ax2.set_xlim([z_re-5.5+z_c_del*0.1,z_re])
+
+xi=bias.xi_arr(np.arange(z_re-5.5,z_re,0.1))
+xi_nov=bias.xi_arr_nov(np.arange(z_re-5.5,z_re,0.1))
+dxi_dz=-np.gradient(xi,np.arange(z_re-5.5,z_re,0.1))
+dxi_dv=xi-xi_nov
+
+ax1.set_yscale('log')
+ax1.set_ylabel(r'$x_i$')
+ax1.set(title='Reionization Histories')
+ax1.legend()
 # ax2.set_yscale('log')
 # ax2.set_ylabel(r'$dx_i/dz$')
 # ax2.set_yscale('log')
-# ax3.set_yscale('log')
-# ax3.set_xlabel('z')
-# ax3.set_ylabel(r'$\partial x_i/\partial(v_{bc}^2/\sigma^2)$')
-
-
-# plt.show()
-
-
-for z_re in [8.0,8.5,9.0,10.0,11.0,12.0]:
-	bias = b_sink(z_re,z_re-6.0)
-	xi=bias.xi_arr(np.arange(6.0,z_re,0.1))
-	plt.plot(np.arange(6.0,z_re,0.1),xi,label=r'$z_{re}=$'+str(z_re))
-
-plt.yscale('log')
-plt.legend()
-plt.xlabel('z')
-plt.ylabel(r'$x_i$')
-plt.title('Reionization Histories')
+ax2.set_yscale('log')
+ax2.set_xlabel('z')
+ax2.set_ylabel(r'$\partial x_i/\partial(v_{bc}^2/\sigma^2)$')
+plt.figure(figsize=(40,20))
 plt.show()
+
 
 # for z_re in [8.0,8.5,9.0,10.0,11.0,12.0]:
 # 	bias = b_sink(z_re,z_re-6.0)
-# 	xi=bias.xi_arr(np.arange(z_re-6.0,z_re,0.1))
-# 	xi_nov=bias.xi_arr_nov(np.arange(z_re-6.0,z_re,0.1))
-# 	dxi_dz=xi-xi_nov
-# 	plt.plot(np.arange(z_re-6.0,z_re,0.1),dxi_dz,label=r'$z_{re}=$'+str(z_re))
+# 	xi=bias.xi_arr(np.arange(6.0,z_re,0.1))
+# 	plt.plot(np.arange(6.0,z_re,0.1),xi,color='red',linewidth=0.8,label=r'$z_{re}=$'+str(z_re))
+
+# plt.yscale('log')
+# plt.legend()
+# plt.xlabel('z')
+# plt.ylabel(r'$x_i$')
+# plt.title('Reionization Histories')
+# plt.show()
+
+# z_re=9.0
+# # for z_re in [6.0,7.0,8.0,8.5,9.0,10.0,11.0,12.0]:
+# bias = b_sink(z_re,z_re-6.0)
+# xi=bias.xi_arr(np.arange(z_re-6.0,z_re,0.1))
+# xi_nov=bias.xi_arr_nov(np.arange(z_re-6.0,z_re,0.1))
+# dxi_dz=xi-xi_nov
+# plt.plot(np.arange(z_re-6.0,z_re,0.1),dxi_dz,label=r'$z_{re}=$'+str(z_re))
 
 # plt.yscale('log')
 # plt.legend()
@@ -627,7 +845,7 @@ plt.show()
 # ax1.set_ylabel(r'$x_i$')
 # ax1.legend()
 
-# for z_re in [8.0,8.5,9.0,10.0,11.0,12.0]:
+# for z_re in [6.0,7.0,8.0,8.5,9.0,10.0,11.0,12.0]:
 # 	bias = b_sink(z_re, 6.0)
 # 	CR = bias.CR(z_re,np.arange(0.,6.,0.1))
 # 	ax2.plot(np.arange(z_re,z_re-6.,-0.1),CR,label=r'$z_{re}=$'+str(z_re))
@@ -660,17 +878,20 @@ plt.show()
 ##############################################
 #######        CR z_re-z curve          ######
 ##############################################
-# for z_re in [8.0,8.5,9.0,10.0,11.0,12.0]:
-# 	bias = b_sink(z_re, 6.0)
-# 	CR = bias.CR(z_re,np.arange(0.,6.,0.1))
-# 	plt.plot(np.arange(z_re,z_re-6.,-0.1),CR,label=r'$z_{re}=$'+str(z_re))
+# z_res = [8.0,8.5,9.0,10.0,11.0,12.0]
+# colors = cm.Set2(np.linspace(0,1,len(z_res)))
+# for i,color in enumerate(colors):
+# 	bias = b_sink(z_res[i], 6.0)
+# 	CR = bias.CR(z_res[i],np.arange(0.,6.,0.1))
+# 	plt.plot(np.arange(z_res[i],z_res[i]-6.,-0.1),CR,linewidth=0.8,color=color,label=r'$z_{re}=$'+str(z_res[i]))
 
 # plt.yscale('log')
 # plt.legend()
 # plt.xlabel('z')
 # plt.ylabel(r'$C_R$')
+# plt.figure(figsize=(40,20))
 # plt.show()
-# plt.close()
+
 
 
 # CRs=[]
